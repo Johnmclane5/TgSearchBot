@@ -58,7 +58,9 @@ async def channel_search_callback_handler(client, callback_query: CallbackQuery)
                     f"Spelling check 👉 <b><a href=\"{google_search_url}\">Google</a></b>\n\n")
             text = bot.remove_surrogates(text)
             await callback_query.edit_message_text(text, disable_web_page_preview=True)
-            await safe_api_call(client.send_message(LOG_CHANNEL_ID, text=f"{user_link} | <code>{user_id}</code>\n{channel_name} <code>{query}</code>"))
+            await safe_api_call(client.send_message(
+                LOG_CHANNEL_ID, text=f"{user_link} | <code>{user_id}</code>\n{channel_name} | <code>{query}</code>"
+                ))
             return
 
         total_pages = (total_files + bot.SEARCH_PAGE_SIZE - 1) // bot.SEARCH_PAGE_SIZE
