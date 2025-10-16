@@ -138,32 +138,35 @@ async def send_file_callback(client, callback_query: CallbackQuery):
 
         file_name = file_doc.get("file_name", "Unknown File")
 
-        stream_url = f"{MY_DOMAIN}/stream/{file_link}"
         download_url = f"{MY_DOMAIN}/download/{file_link}"
-
-        vlc_url = f"{MY_DOMAIN}/play/vlc/{file_link}"
         mx_player_url = f"{MY_DOMAIN}/play/mx/{file_link}"
         mx_player_pro_url = f"{MY_DOMAIN}/play/mxpro/{file_link}"
 
         buttons = [
             [InlineKeyboardButton("📥 Download", url=download_url)],
-            [InlineKeyboardButton("▶️ Play in VLC", url=vlc_url)],
             [InlineKeyboardButton("▶️ Play in MX Player", url=mx_player_url)],
-            [InlineKeyboardButton("▶️ Play in MX Player Pro", url=mx_player_pro_url)],
-            [InlineKeyboardButton("🖥️ Stream", url=stream_url)]
+            [InlineKeyboardButton("▶️ Play in MX Player Pro", url=mx_player_pro_url)]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
 
-        await safe_api_call(callback_query.message.reply_text(
-            text=f"🎥 <b>{file_name}</b>",
+        copy_msg = await safe_api_call(client.copy_message(
+            chat_id=user_id,
+            from_chat_id=file_doc["channel_id"],
+            message_id=file_doc["message_id"],
+            caption=f"🎥 <b>{file_name}</b>",
             reply_markup=reply_markup,
-            disable_web_page_preview=True
+            protect_content=True
         ))
 
-        bot.user_file_count[user_id] = bot.user_file_count.get(user_id, 0) + 1
-        await safe_api_call(callback_query.answer(
-            "File is ready. You can stream or download it.", show_alert=True
-        ))
+        if copy_msg:
+            bot.user_file_count[user_id] = bot.user_file_count.get(user_id, 0) + 1
+            await safe_api_call(callback_query.answer(
+                "File sent successfully!", show_alert=True
+            ))
+        else:
+            await safe_api_call(callback_query.answer(
+                "Failed to send file. Please try again later.", show_alert=True
+            ))
 
     except Exception as e:
         logger.error(f"Error in send_file_callback: {e}")
