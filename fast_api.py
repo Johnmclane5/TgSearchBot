@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from config import MY_DOMAIN
 
-
 api = FastAPI()
 api.add_middleware(
     CORSMiddleware,
@@ -12,7 +11,6 @@ api.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 @api.get("/")
 async def root():
