@@ -1,4 +1,5 @@
 import base64
+import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,8 @@ api.add_middleware(
 )
 
 CHUNK_SIZE = 1024 * 1024
+CONCURRENCY_LIMIT = 3
+semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
 @api.get("/")
 async def root():
@@ -43,16 +46,17 @@ async def get_file_stream(channel_id, message_id, request: Request):
     byte_offset_in_chunk = start % CHUNK_SIZE
 
     async def media_streamer():
-        message = await bot.get_messages(chat_id=channel_id, message_ids=message_id)
-        stream = bot.stream_media(message, offset=chunk_offset)
+        async with semaphore:
+            message = await bot.get_messages(chat_id=channel_id, message_ids=message_id)
+            stream = bot.stream_media(message, offset=chunk_offset)
 
-        first_chunk = True
-        async for chunk in stream:
-            if first_chunk:
-                first_chunk = False
-                yield chunk[byte_offset_in_chunk:]
-            else:
-                yield chunk
+            first_chunk = True
+            async for chunk in stream:
+                if first_chunk:
+                    first_chunk = False
+                    yield chunk[byte_offset_in_chunk:]
+                else:
+                    yield chunk
 
     return media_streamer, start, end, file_size
 
