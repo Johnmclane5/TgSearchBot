@@ -8,7 +8,7 @@ from pyrogram import filters, enums
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import MessageNotModified
 
-from config import LOG_CHANNEL_ID, BOT_USERNAME
+from config import LOG_CHANNEL_ID, BOT_USERNAME, MY_DOMAIN
 from db import files_col, allowed_channels_col, tokens_col
 from utility import (
     get_user_link,
@@ -136,21 +136,37 @@ async def send_file_callback(client, callback_query: CallbackQuery):
             await callback_query.answer("File not found.", show_alert=True)
             return
 
+        file_name = file_doc.get("file_name", "Unknown File")
+
+        download_url = f"{MY_DOMAIN}/download/{file_link}"
+        mx_player_url = f"{MY_DOMAIN}/play/mx/{file_link}"
+        mx_player_pro_url = f"{MY_DOMAIN}/play/mxpro/{file_link}"
+
+        buttons = [
+            [InlineKeyboardButton("📥 Download", url=download_url)],
+            [InlineKeyboardButton("▶️ Play in MX Player", url=mx_player_url)],
+            [InlineKeyboardButton("▶️ Play in MX Player Pro", url=mx_player_pro_url)]
+        ]
+        reply_markup = InlineKeyboardMarkup(buttons)
+
         copy_msg = await safe_api_call(client.copy_message(
             chat_id=user_id,
-            caption=f'<b>{file_doc["file_name"]}</b>',
             from_chat_id=file_doc["channel_id"],
-            message_id=file_doc["message_id"]
+            message_id=file_doc["message_id"],
+            caption=f"🎥 <b>{file_name}</b>",
+            reply_markup=reply_markup,
+            protect_content=True
         ))
 
         if copy_msg:
             bot.user_file_count[user_id] = bot.user_file_count.get(user_id, 0) + 1
             await safe_api_call(callback_query.answer(
-                "File will be auto deleted in 3 minutes — forward it.", show_alert=True
+                "File sent successfully!", show_alert=True
             ))
-            bot.loop.create_task(delete_after_delay(client, copy_msg.chat.id, copy_msg.id))
         else:
-            await callback_query.answer("Failed to send file. Please try again later.", show_alert=True)
+            await safe_api_call(callback_query.answer(
+                "Failed to send file. Please try again later.", show_alert=True
+            ))
 
     except Exception as e:
         logger.error(f"Error in send_file_callback: {e}")
