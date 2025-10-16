@@ -1,6 +1,6 @@
 import base64
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.status import HTTP_404_NOT_FOUND
 from app import bot
@@ -97,3 +97,18 @@ async def download_file(file_link: str, request: Request):
     }
 
     return StreamingResponse(media_streamer(), headers=headers)
+
+@api.get("/play/{player}/{file_link}")
+async def play_in_player(player: str, file_link: str):
+    stream_url = f"{MY_DOMAIN}/stream/{file_link}"
+
+    if player == "vlc":
+        redirect_url = f"vlc://{stream_url}"
+    elif player == "mx":
+        redirect_url = f"intent:{stream_url}#Intent;package=com.mxtech.videoplayer.ad;end"
+    elif player == "mxpro":
+        redirect_url = f"intent:{stream_url}#Intent;package=com.mxtech.videoplayer.pro;end"
+    else:
+        raise HTTPException(status_code=404, detail="Player not supported")
+
+    return RedirectResponse(url=redirect_url, status_code=302)
