@@ -144,9 +144,9 @@ async def send_file_callback(client, callback_query: CallbackQuery):
 
         buttons = [
             [
-                InlineKeyboardButton("📥 Download", url=download_url),
-                InlineKeyboardButton("▶️ Play in MX Player", url=mx_player_url),
-                InlineKeyboardButton("▶️ Play in MX Player Pro", url=mx_player_pro_url)
+                InlineKeyboardButton("📥 DL", url=download_url),
+                InlineKeyboardButton("▶️ MX", url=mx_player_url),
+                InlineKeyboardButton("▶️ MX Pro", url=mx_player_pro_url)
             ]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
