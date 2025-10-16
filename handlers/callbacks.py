@@ -141,9 +141,16 @@ async def send_file_callback(client, callback_query: CallbackQuery):
         stream_url = f"{MY_DOMAIN}/stream/{file_link}"
         download_url = f"{MY_DOMAIN}/download/{file_link}"
 
+        vlc_url = f"vlc://{stream_url}"
+        mx_player_url = f"intent:{stream_url}#Intent;package=com.mxtech.videoplayer.ad;end"
+        mx_player_pro_url = f"intent:{stream_url}#Intent;package=com.mxtech.videoplayer.pro;end"
+
         buttons = [
-            [InlineKeyboardButton("🖥️ Stream", url=stream_url)],
-            [InlineKeyboardButton("📥 Download", url=download_url)]
+            [InlineKeyboardButton("📥 Download", url=download_url)],
+            [InlineKeyboardButton("▶️ Play in VLC", url=vlc_url)],
+            [InlineKeyboardButton("▶️ Play in MX Player", url=mx_player_url)],
+            [InlineKeyboardButton("▶️ Play in MX Player Pro", url=mx_player_pro_url)],
+            [InlineKeyboardButton("🖥️ Stream", url=stream_url)]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
 

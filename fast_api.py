@@ -39,11 +39,20 @@ async def get_file_stream(channel_id, message_id, request: Request):
         if end_str:
             end = int(end_str)
 
+    chunk_offset = start // CHUNK_SIZE
+    byte_offset_in_chunk = start % CHUNK_SIZE
+
     async def media_streamer():
         message = await bot.get_messages(chat_id=channel_id, message_ids=message_id)
-        stream = bot.stream_media(message, offset=start)
+        stream = bot.stream_media(message, offset=chunk_offset)
+
+        first_chunk = True
         async for chunk in stream:
-            yield chunk
+            if first_chunk:
+                first_chunk = False
+                yield chunk[byte_offset_in_chunk:]
+            else:
+                yield chunk
 
     return media_streamer, start, end, file_size
 
