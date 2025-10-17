@@ -9,9 +9,6 @@ from utility import file_queue_worker, periodic_expiry_cleanup
 from fast_api import api
 from config import LOG_CHANNEL_ID
 
-# Import handlers
-from handlers import owner, user, callbacks
-
 async def main():
     """
     Starts the bot and FastAPI server.

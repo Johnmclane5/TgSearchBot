@@ -106,9 +106,7 @@ async def download_file(file_link: str, request: Request):
 async def play_in_player(player: str, file_link: str):
     stream_url = f"{MY_DOMAIN}/stream/{file_link}"
 
-    if player == "vlc":
-        redirect_url = f"vlc://{stream_url}"
-    elif player == "mx":
+    if player == "mx":
         redirect_url = f"intent:{stream_url}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;end"
     elif player == "mxpro":
         redirect_url = f"intent:{stream_url}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.pro;end"

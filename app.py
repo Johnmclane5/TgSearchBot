@@ -1,12 +1,9 @@
-
+import re
 import asyncio
 import base64
-import re
-from collections import defaultdict
-
 from pyrogram import Client, enums
-
 from cache import user_file_count
+from config import API_ID, API_HASH, BOT_TOKEN
 
 class Bot(Client):
     def __init__(self, *args, **kwargs):
@@ -32,7 +29,6 @@ class Bot(Client):
         raw = f"{channel_id}_{message_id}".encode()
         return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
-from config import API_ID, API_HASH, BOT_TOKEN
 
 bot = Bot(
     "bot",

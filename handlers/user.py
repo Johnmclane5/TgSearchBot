@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 import asyncio
 from pyrogram import filters, enums
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import ChatAdminRequired, UserAlreadyParticipant
 
 from config import LOG_CHANNEL_ID, BOT_USERNAME, BACKUP_CHANNEL

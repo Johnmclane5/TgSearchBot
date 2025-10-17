@@ -18,7 +18,6 @@ from utility import (
     generate_token,
     shorten_url,
     get_token_link,
-    delete_after_delay,
     safe_api_call,
 )
 from query_helper import get_query_by_id
@@ -146,7 +145,7 @@ async def send_file_callback(client, callback_query: CallbackQuery):
             [
                 InlineKeyboardButton("📥 DL", url=download_url),
                 InlineKeyboardButton("▶️ MX", url=mx_player_url),
-                InlineKeyboardButton("▶️ MX Pro", url=mx_player_pro_url)
+                InlineKeyboardButton("▶️ Pro", url=mx_player_pro_url)
             ]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
