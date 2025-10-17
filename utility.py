@@ -76,40 +76,23 @@ def build_search_pipeline(query, allowed_ids, skip, limit):
     # Split the query string into words
     terms = query.strip().lower().split()
 
-    # Define different search clauses
-    should_clauses = [
-        # Boost exact phrase matches
+    # Create a separate `text` clause for each term
+    must_clauses = [
         {
-            "phrase": {
-                "query": query,
-                "path": "file_name",
-                "score": {"boost": {"value": 3.0}}
+            "text": {
+                "query": term,
+                "path": "file_name"
             }
         }
+        for term in terms
     ]
-    
-    # Fuzzy match on individual terms
-    for term in terms:
-        should_clauses.append(
-            {
-                "text": {
-                    "query": term,
-                    "path": "file_name",
-                    "fuzzy": {
-                        "maxEdits": 2,
-                        "prefixLength": 2
-                    }
-                }
-            }
-        )
 
-    # Build search stage with compound.should
+    # Build search stage with compound.must
     search_stage = {
         "$search": {
             "index": "default",
             "compound": {
-                "should": should_clauses,
-                "minimumShouldMatch": 1
+                "must": must_clauses
             }
         }
     }
@@ -137,8 +120,8 @@ def build_search_pipeline(query, allowed_ids, skip, limit):
     # Sort results by score and then file name
     sort_stage = {
         "$sort": {
-            "score": -1,
-            "file_name": 1
+            "file_name": 1,
+            "score": -1
         }
     }
 
