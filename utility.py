@@ -1,32 +1,14 @@
 
-import re
-import aiohttp
 import asyncio
 import base64
-import uuid
-import time
-import PTN
-import os
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 from pyrogram.errors import FloodWait, UserNotParticipant, UserIsBlocked, InputUserDeactivated, PeerIdInvalid, UserIsBot
-from pyrogram import enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, User
-from db import (
-    allowed_channels_col,
-    users_col,
-    tokens_col,
-    auth_users_col,
-    files_col,
-    tmdb_col
-)
+
+from db import users_col, tokens_col, auth_users_col
 from config import *
-from tmdb import get_movie_id, get_tv_id, get_info
-from mutagen.mp3 import MP3
-from mutagen.flac import FLAC
-from mutagen.mp4 import MP4
-from mutagen.id3 import ID3, APIC
-from mutagen import File as MutagenFile
 
 # =========================
 # Constants & Globals
@@ -35,149 +17,27 @@ from mutagen import File as MutagenFile
 TOKEN_VALIDITY_SECONDS = 24 * 60 * 60  # 24 hours
 AUTO_DELETE_SECONDS = 3 * 60
 
-# Simple in-memory cache: {(q, channel_id): (timestamp, results)}
-search_api_cache = {}
-CACHE_TTL = 300  # 5 minutes
-
 logger = logging.getLogger(__name__)
 
-def get_cache_key(q, channel_id):
-    return (q.strip().lower(), channel_id)
-
-# CACHE FOR SEARCH RESULTS
-search_cache = {}
-SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
-
-def make_search_cache_key(query, page, channel_id=None):
-    return (query.lower(), page, channel_id)
-
-def get_cached_search(query, page, channel_id=None):
-    key = make_search_cache_key(query, page, channel_id)
-    entry = search_cache.get(key)
-    if entry and (time.time() - entry['time'] < SEARCH_CACHE_TTL):
-        return entry['files'], entry['total_files']
-    if entry:
-        del search_cache[key]
-    return None, None
-
-def set_cached_search(query, page, channel_id, files, total_files):
-    key = make_search_cache_key(query, page, channel_id)
-    search_cache[key] = {
-        'files': files,
-        'total_files': total_files,
-        'time': time.time()
-    }
-
-def invalidate_search_cache():
-    search_cache.clear()
-    search_api_cache.clear()
-
-def build_search_pipeline(query, allowed_ids, skip, limit):
-    # Split the query string into words
-    terms = query.strip().lower().split()
-
-    # Create a separate `text` clause for each term
-    must_clauses = [
-        {
-            "text": {
-                "query": term,
-                "path": "file_name"
-            }
-        }
-        for term in terms
-    ]
-
-    # Build search stage with compound.must
-    search_stage = {
-        "$search": {
-            "index": "default",
-            "compound": {
-                "must": must_clauses
-            }
-        }
-    }
-
-    # Match allowed channel IDs
-    match_stage = {
-        "$match": {
-            "channel_id": {"$in": allowed_ids}
-        }
-    }
-
-    # Project only necessary fields and search score
-    project_stage = {
-        "$project": {
-            "_id": 0,
-            "file_name": 1,
-            "file_size": 1,
-            "file_format": 1,
-            "message_id": 1,
-            "channel_id": 1,
-            "score": {"$meta": "searchScore"}
-        }
-    }
-
-    # Sort results by score and then file name
-    sort_stage = {
-        "$sort": {
-            "file_name": 1,
-            "score": -1
-        }
-    }
-
-    # Facet: paginated results and total count
-    facet_stage = {
-        "$facet": {
-            "results": [
-                project_stage,
-                sort_stage,
-                {"$skip": skip},
-                {"$limit": limit}
-            ],
-            "totalCount": [
-                {"$count": "total"}
-            ]
-        }
-    }
-
-    return [search_stage, match_stage, facet_stage]
-
 # =========================
-# Channel & User Utilities
+# User Utilities
 # =========================
-
-async def get_allowed_channels():
-    return [
-        doc["channel_id"]
-        for doc in allowed_channels_col.find({}, {"_id": 0, "channel_id": 1})
-    ]
 
 def add_user(user_id):
-    """
-    Add a user to users_col only if not already present.
-    Stores user_id, joined_date (UTC), and blocked status.
-    Returns the user document with an extra key '_new' (True if newly added).
-    """
     user_doc = users_col.find_one({"user_id": user_id})
-    
     if not user_doc:
         user_doc = {
             "user_id": user_id,
             "joined": datetime.now(timezone.utc),
             "blocked": False
         }
-
         users_col.insert_one(user_doc)
-
         user_doc["_new"] = True
     else:
         user_doc["_new"] = False
-    
     return user_doc
 
-
 def authorize_user(user_id):
-    """Authorize a user for 24 hours."""
     expiry = datetime.now(timezone.utc) + timedelta(seconds=TOKEN_VALIDITY_SECONDS)
     auth_users_col.update_one(
         {"user_id": user_id},
@@ -186,42 +46,23 @@ def authorize_user(user_id):
     )
 
 def is_user_authorized(user_id):
-    """Check if a user is authorized."""
     doc = auth_users_col.find_one({"user_id": user_id})
     if not doc:
         return False
     expiry = doc["expiry"]
-    if isinstance(expiry, str):
-        try:
-            expiry = datetime.fromisoformat(expiry)
-        except Exception:
-            return False
     if isinstance(expiry, datetime) and expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
-    if expiry < datetime.now(timezone.utc):
-        return False
-    return True
+    return expiry >= datetime.now(timezone.utc)
+
 
 async def get_user_link(user: User) -> str:
-    try:
-        user_id = user.id if hasattr(user, 'id') else None
-        first_name = user.first_name if hasattr(user, 'first_name') else "Unknown"
-    except Exception as e:
-        logger.info(f"{e}")
-        user_id = None
-        first_name = "Unknown"
-    
-    if user_id:
-        return f'<a href=tg://user?id={user_id}>{first_name}</a>'
-    else:
-        return first_name
-    
+    return f'<a href=tg://user?id={user.id}>{user.first_name}</a>'
+
 # =========================
 # Token Utilities
 # =========================
 
 def generate_token(user_id):
-    """Generate a new access token for a user."""
     token_id = str(uuid.uuid4())
     expiry = datetime.now(timezone.utc) + timedelta(seconds=TOKEN_VALIDITY_SECONDS)
     tokens_col.insert_one({
@@ -233,7 +74,6 @@ def generate_token(user_id):
     return token_id
 
 def is_token_valid(token_id, user_id):
-    """Check if a token is valid for a user."""
     token = tokens_col.find_one({"token_id": token_id, "user_id": user_id})
     if not token:
         return False
@@ -246,426 +86,108 @@ def is_token_valid(token_id, user_id):
     return True
 
 def get_token_link(token_id, bot_username):
-    """Generate a Telegram deep link for a token."""
     return f"https://telegram.dog/{bot_username}?start=token_{token_id}"
 
 async def is_user_subscribed(client, user_id):
-    """Check if a user is subscribed to backup channel."""
     if not BACKUP_CHANNEL:
-        return True  # No backup channel configured, consider all subscribed
+        return True
     try:
         member = await client.get_chat_member(BACKUP_CHANNEL, user_id)
+        return not member.status == 'kicked'
     except UserNotParticipant:
-        pass
+        return False
     except Exception as e:
-        logger.exception(e)
-    else:
-        if not member.status == 'kicked':
-            return True
-        
-    return False
+        logger.error(e)
+        return False
+
 # =========================
 # Link & URL Utilities
 # =========================
 
-def generate_telegram_link(bot_username, channel_id, message_id):
-    """Generate a base64-encoded Telegram deep link for a file."""
-    raw = f"{channel_id}_{message_id}".encode()
-    b64 = base64.urlsafe_b64encode(raw).decode().rstrip("=")
-    return f"https://telegram.dog/{bot_username}?start=file_{b64}" 
-
-def generate_c_link(channel_id, message_id):
-    # channel_id must be like -1001234567890
-    return f"https://t.me/c/{str(channel_id)[4:]}/{message_id}"
-
-def extract_channel_and_msg_id(link):
-    # Only support t.me/c/(-?\d+)/(\d+)
-    match = re.search(r"t\.me/c/(-?\d+)/(\d+)", link)
-    if match:
-        channel_id = int("-100" + match.group(1)) if not match.group(1).startswith("-100") else int(match.group(1))
-        msg_id = int(match.group(2))
-        return channel_id, msg_id
-    raise ValueError("Invalid Telegram message link format. Only /c/ links are supported.")
-
-async def shorten_url(url):
-    """
-    Shorten a URL using the configured shortener service.
-    Returns the original URL if shortening fails.
-    """
-    try:
-        api_url = f"https://{SHORTERNER_URL}/api"
-        params = {
-            "api": URLSHORTX_API_TOKEN,
-            "url": url,
-            "format": "text"
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, params=params) as response:
-                if response.status == 200:
-                    return (await response.text()).strip()
-                else:
-                    logger.error(
-                        f"URL shortening failed. Status code: {response.status}, Response: {await response.text()}"
-                    )
-                    return url
-    except Exception as e:
-        logger.error(f"URL shortening failed: {e}")
-        return url
-    
-# =========================
-# File Utilities
-# =========================
-def upsert_file_info(file_info):
-    """Insert or update file info, avoiding duplicates."""
-    files_col.update_one(
-        {"channel_id": file_info["channel_id"], "message_id": file_info["message_id"]},
-        {"$set": file_info},
-        upsert=True
-    )
-
-def upsert_tmdb_info(tmdb_id, tmdb_type):
-    """
-    Insert or update TMDB info in tmdb_col.
-    Only stores tmdb_id and tmdb_type.
-    """
-    tmdb_col.update_one(
-        {"tmdb_id": tmdb_id, "tmdb_type": tmdb_type},
-        {"$setOnInsert": {"tmdb_id": tmdb_id, "tmdb_type": tmdb_type}},
-        upsert=True
-    )
-
-async def restore_tmdb_photos(bot, start_id=None):
-    """
-    Restore all TMDB poster photos from the database.
-    For each tmdb entry, fetch details and send the poster to UPDATE_CHANNEL_ID.
-    """
-    query = {}
-    if start_id:
-        query['_id'] = {'$gt': start_id}
-    cursor = tmdb_col.find(query).sort('_id', 1)
-    docs = list(cursor)
-    for doc in docs:
-        tmdb_id = doc.get("tmdb_id")
-        tmdb_type = doc.get("tmdb_type")
-        try:
-            results = await get_info(tmdb_type, tmdb_id)
-            poster_url = results.get('poster_url')
-            trailer = results.get('trailer_url')
-            info = results.get('message')
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🎥 Trailer", url=trailer)]]) if trailer else None
-            if poster_url:
-                await safe_api_call(
-                    bot.send_photo(
-                        UPDATE_CHANNEL_ID,
-                        photo=poster_url,
-                        caption=info,
-                        parse_mode=enums.ParseMode.HTML,
-                        reply_markup=keyboard
-                    )
-                )
-        except Exception as e:
-            logger.error(f"Error in restore_tmdb_photos for tmdb_id={tmdb_id}: {e}")
-            continue  # Continue to the next doc
-
-
-def extract_file_info(message, channel_id=None):
-    """Extract file info from a Pyrogram message."""
-    caption_name = message.caption.strip() if message.caption else None
-    file_info = {
-        "channel_id": channel_id if channel_id is not None else message.chat.id,
-        "message_id": message.id,
-        "file_name": None,
-        "file_size": None,
-        "file_format": None,
-    }
-    if message.document:
-        file_info["file_name"] = caption_name or message.document.file_name
-        file_info["file_size"] = message.document.file_size
-        file_info["file_format"] = message.document.mime_type
-    elif message.video:
-        file_info["file_name"] = caption_name or (message.video.file_name or "video.mp4")
-        file_info["file_size"] = message.video.file_size
-        file_info["file_format"] = message.video.mime_type
-    elif message.audio:
-        file_info["file_name"] = caption_name or (message.audio.file_name or "audio.mp3")
-        file_info["file_size"] = message.audio.file_size
-        file_info["file_format"] = message.audio.mime_type
-    elif message.photo:
-        file_info["file_name"] = caption_name or "photo.jpg"
-        file_info["file_size"] = getattr(message.photo, "file_size", None)
-        file_info["file_format"] = "image/jpeg"
-    if file_info["file_name"]:
-        file_info["file_name"] = remove_extension(re.sub(r"[',]", "", file_info["file_name"].replace("&", "and")))
-    return file_info
-
-def human_readable_size(size):
-    for unit in ['B','KB','MB','GB','TB']:
-        if size < 1024:
-            return f"{size:.2f} {unit}"
-        size /= 1024
-    return f"{size:.2f} PB"
-
-def remove_extension(caption):
-    try:
-        # Remove the extension and everything after it
-        cleaned_caption = re.sub(r'\.(mkv|mp4|webm).*$', '', caption, flags=re.IGNORECASE)
-        return cleaned_caption
-    except Exception as e:
-        logger.error(e)
-        return None
-    
-def remove_unwanted(caption):
-    try:
-        # Match and keep everything up to and including the extension
-        match = re.match(r'^(.*?\.(mkv|mp4|webm))', caption, flags=re.IGNORECASE)
-        if match:
-            return match.group(1)
-        return caption  # Return original if no match
-    except Exception as e:
-        logger.error(e)
-        return None
+def encode_file_link(channel_id, message_id):
+    return base64.urlsafe_b64encode(f"{channel_id}_{message_id}".encode()).decode().rstrip("=")
 
 # =========================
 # Async/Bot Utilities
 # =========================
+
 async def safe_api_call(coro):
-    """Utility wrapper to add delay before every bot API call."""
     try:
         return await coro
     except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid, UserIsBot) as e:
-        raise e
+        logger.warning(f"User related error: {e}")
+        raise
     except FloodWait as e:
         await asyncio.sleep(e.value * 1.2)
+        return await safe_api_call(coro)
     except Exception as e:
         logger.error(f"An error occurred during an API call: {e}")
         return None
 
-async def delete_after_delay(client, channel_id, message_id, delay=AUTO_DELETE_SECONDS):
-    await asyncio.sleep(delay)
-    try:
-        await safe_api_call(client.delete_messages(channel_id, message_id))
-    except Exception as e:
-        logger.error(f"Failed to auto delete message: {e}")
+async def auto_delete_message(*messages):
+    await asyncio.sleep(AUTO_DELETE_SECONDS)
+    for message in messages:
+        if message:
+            try:
+                await safe_api_call(message.delete())
+            except Exception:
+                pass
 
-async def auto_delete_message(user_message, bot_message):
-    try:        
-        await asyncio.sleep(AUTO_DELETE_SECONDS)
-        await safe_api_call(user_message.delete())
-        await safe_api_call(bot_message.delete())
-    except Exception as e:
-        pass
-
-
-async def extract_tmdb_link(tmdb_url):
-    movie_pattern = r'themoviedb\.org\/movie\/(\d+)'
-    tv_pattern = r'themoviedb\.org\/tv\/(\d+)'
-    collection_pattern = r'themoviedb\.org\/collection\/(\d+)'
-    if re.search(movie_pattern, tmdb_url):
-        tmdb_type = 'movie'
-        tmdb_id = int(re.search(movie_pattern, tmdb_url).group(1))
-    elif re.search(tv_pattern, tmdb_url):
-        tmdb_type = 'tv'
-        tmdb_id = int(re.search(tv_pattern, tmdb_url).group(1)) 
-    elif re.search(collection_pattern, tmdb_url):
-        tmdb_type = 'collection'
-        tmdb_id = int(re.search(collection_pattern, tmdb_url).group(1)) 
-    else:
-        raise ValueError("Invalid TMDB link. Must be a movie, tv, or collection link.")
-    return tmdb_type, tmdb_id
-        
 # =========================
 # Queue System for File Processing
 # =========================
 
 file_queue = asyncio.Queue()
 
-async def handle_duplicate_file(bot, file_info):
-    """Checks for duplicate files and logs if found."""
-    existing = files_col.find_one({
-        "channel_id": file_info["channel_id"],
-        "file_name": file_info["file_name"]
-    })
-    if existing:
-        telegram_link = generate_c_link(file_info["channel_id"], file_info["message_id"])
-        await safe_api_call(
-            bot.send_message(
-                LOG_CHANNEL_ID,
-                f"⚠️ Duplicate File.\nLink: {telegram_link}",
-                parse_mode=enums.ParseMode.HTML
-            )
-        )
-        return True
-    return False
-
-async def process_audio_file(bot, message):
-    """Processes audio files: downloads, gets thumbnail, sends info, and cleans up."""
-    try:
-        audio_path = await bot.download_media(message)
-        thumb_path = await get_audio_thumbnail(audio_path)
-        if thumb_path:
-            file_info_text = f"🎧 <b>Title:</b> {message.audio.title}\n🧑‍🎤 <b>Artist:</b> {message.audio.performer}"
-            await bot.send_photo(UPDATE_CHANNEL_ID2, photo=thumb_path, caption=file_info_text)
-            os.remove(thumb_path)
-        os.remove(audio_path)
-    except Exception as e:
-        logger.error(f"Error processing audio file: {e}")
-
-
-async def process_tmdb_info(bot, file_info):
-    """Processes TMDB info for a file."""
-    try:
-        if str(file_info["channel_id"]) in TMDB_CHANNEL_ID:
-            title = remove_redandent(file_info["file_name"])
-            parsed_data = PTN.parse(title)
-            title = parsed_data.get("title", "").replace("_", " ").replace("-", " ").replace(":", " ")
-            title = ' '.join(title.split())
-            year = parsed_data.get("year")
-            season = parsed_data.get("season")
-            episode = parsed_data.get("episode")
-            if season or episode:
-                result = await get_tv_id(title, year)
-            else:
-                result = await get_movie_id(title, year)
-            tmdb_id, tmdb_type = result['id'], result['media_type']
-            exists = tmdb_col.find_one({"tmdb_id": tmdb_id, "tmdb_type": tmdb_type})
-            if not exists:
-                results = await get_info(tmdb_type, tmdb_id)
-                poster_url = results.get('poster_url')
-                trailer = results.get('trailer_url')
-                info = results.get('message')
-                keyboard = InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("🎥 Trailer", url=trailer)]]) if trailer else None
-
-                if poster_url:
-                    await safe_api_call(
-                        bot.send_photo(
-                            UPDATE_CHANNEL_ID,
-                            photo=poster_url,
-                            caption=info,
-                            parse_mode=enums.ParseMode.HTML,
-                            reply_markup=keyboard
-                        )
-                    )
-                    upsert_tmdb_info(tmdb_id, tmdb_type)
-    except Exception as e:
-        logger.info(f"TMDB Info not found for {file_info['file_name']}: {e}")
-
-
 async def file_queue_worker(bot):
     while True:
-        item = await file_queue.get()
-        file_info, _, message, duplicate = item
+        user_message, reply_message = await file_queue.get()
         try:
-            if duplicate and await handle_duplicate_file(bot, file_info):
-                continue
+            log_message = await user_message.forward(LOG_CHANNEL_ID)
 
-            upsert_file_info(file_info)
+            file_link = encode_file_link(log_message.chat.id, log_message.id)
 
-            if duplicate:
-                if message.audio:
-                    await process_audio_file(bot, message)
-                await process_tmdb_info(bot, file_info)
+            file_name = getattr(user_message, user_message.media.value).file_name or "N/A"
 
+            download_url = f"{MY_DOMAIN}/download/{file_link}"
+            mx_player_url = f"{MY_DOMAIN}/play/mx/{file_link}"
+            mx_player_pro_url = f"{MY_DOMAIN}/play/mxpro/{file_link}"
+
+            buttons = [
+                [
+                    InlineKeyboardButton("📥 Download", url=download_url),
+                    InlineKeyboardButton("▶️ MX Player", url=mx_player_url),
+                    InlineKeyboardButton("▶️ MX Player Pro", url=mx_player_pro_url)
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(buttons)
+
+            await reply_message.edit_text(
+                f"🎥 <b>File:</b> <code>{file_name}</code>\n\nYour links are ready!",
+                reply_markup=reply_markup
+            )
+            bot.loop.create_task(auto_delete_message(user_message))
         except Exception as e:
-            logger.error(f"❌ Error saving file: {e}")
+            logger.error(f"Error processing file: {e}")
+            await reply_message.edit_text("❌ Failed to process your file. Please try again later.")
         finally:
             file_queue.task_done()
 
-# =========================
-# Unified File Queueing
-# =========================
 
-async def queue_file_for_processing(message, channel_id=None, reply_func=None, duplicate=True):
-    try:            
-        file_info = extract_file_info(message, channel_id=channel_id)
-        if file_info["file_name"]:
-            await file_queue.put((file_info, reply_func, message, duplicate))
-    except Exception as e:
-        if reply_func:
-            await safe_api_call(reply_func(f"❌ Error queuing file: {e}"))
+async def queue_file_for_processing(user_message, reply_message):
+    await file_queue.put((user_message, reply_message))
 
-def delete_expired_auth_users():
-    """
-    Delete expired auth users from auth_users_col using 'expiry' field.
-    """
-    now = datetime.now(timezone.utc)
-    result = auth_users_col.delete_many({"expiry": {"$lt": now}})
-    logger.info(f"Deleted {result.deleted_count} expired auth users.")
+# =========================
+# Periodic Cleanup
+# =========================
 
 def delete_expired_tokens():
-    """
-    Delete expired tokens from tokens_col using 'expiry' field.
-    """
     now = datetime.now(timezone.utc)
-    result = tokens_col.delete_many({"expiry": {"$lt": now}})
-    logger.info(f"Deleted {result.deleted_count} expired tokens.")
+    tokens_col.delete_many({"expiry": {"$lt": now}})
+    auth_users_col.delete_many({"expiry": {"$lt": now}})
+    logger.info("Expired tokens and authorized users cleaned up.")
 
 async def periodic_expiry_cleanup(interval_seconds=3600 * 4):
-    """
-    Periodically delete expired auth users and tokens.
-    """
     while True:
-        delete_expired_auth_users()
         delete_expired_tokens()
         await asyncio.sleep(interval_seconds)
-
-
-def remove_redandent(filename):
-    """
-    Remove common username patterns from a filename while preserving the content title.
-
-    Args:
-        filename (str): The input filename
-
-    Returns:
-        str: Filename with usernames removed
-    """
-    filename = filename.replace("\n", "\\n")
-
-    patterns = [
-        r"^@[\w\.-]+?(?=_)",
-        r"_@[A-Za-z]+_|@[A-Za-z]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*",  
-        r"^[\w\.-]+?(?=_Uploads_)",  
-        r"^(?:by|from)[\s_-]+[\w\.-]+?(?=_)",  
-        r"^\[[\w\.-]+?\][\s_-]*",  
-        r"^\([\w\.-]+?\)[\s_-]*",  
-    ]
-
-    result = filename
-    for pattern in patterns:
-        match = re.search(pattern, result)
-        if match:
-            result = re.sub(pattern, " ", result)
-            break  
-
-    
-    result = re.sub(r"^[_\s-]+|[_\s-]+$", " ", result)
-
-    return result
-
-async def get_audio_thumbnail(audio_path, output_dir="downloads"):
-    audio = MutagenFile(audio_path)
-    thumbnail_path = os.path.join(output_dir, "audio_thumbnail.jpg")
-
-    if isinstance(audio, MP3):
-        if audio.tags and isinstance(audio.tags, ID3):
-            for tag in audio.tags.values():
-                if isinstance(tag, APIC):
-                    with open(thumbnail_path, "wb") as img_file:
-                        img_file.write(tag.data)
-                    return thumbnail_path
-    elif isinstance(audio, FLAC):
-        if audio.pictures:
-            with open(thumbnail_path, "wb") as img_file:
-                img_file.write(audio.pictures[0].data)
-            return thumbnail_path
-    elif isinstance(audio, MP4):
-        if audio.tags and 'covr' in audio.tags:
-            cover = audio.tags['covr'][0]
-            with open(thumbnail_path, "wb") as img_file:
-                img_file.write(cover)
-            return thumbnail_path
-    
-    return None
