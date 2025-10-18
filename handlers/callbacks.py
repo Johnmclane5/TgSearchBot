@@ -53,8 +53,9 @@ async def channel_search_callback_handler(client, callback_query: CallbackQuery)
 
         if not files:
             google_search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-            text = (f"🚫 Not Available in {channel_name}\n\n"
-                    f"Spelling check 👉 <b><a href=\"{google_search_url}\">Google</a></b>\n\n")
+            text = (f"I couldn't find anything in {channel_name} for that. 😔\n\n"
+                    f"You can double-check the spelling on "
+                    f"<b><a href='{google_search_url}'>Google</a></b> to be sure.")
             text = bot.remove_surrogates(text)
             await callback_query.edit_message_text(text, disable_web_page_preview=True)
             await safe_api_call(client.send_message(
@@ -63,7 +64,7 @@ async def channel_search_callback_handler(client, callback_query: CallbackQuery)
             return
 
         total_pages = (total_files + bot.SEARCH_PAGE_SIZE - 1) // bot.SEARCH_PAGE_SIZE
-        text = f"📂 Found: {total_files} file(s)\n🛒 Category: {bot.remove_surrogates(channel_name)}"
+        text = f"Here's what I found in {bot.remove_surrogates(channel_name)}! 📂"
         buttons = []
         for f in files:
             file_link = bot.encode_file_link(f["channel_id"], f["message_id"])
@@ -119,20 +120,23 @@ async def send_file_callback(client, callback_query: CallbackQuery):
             token_id = token_doc["token_id"] if token_doc else generate_token(user_id)
             short_link = await shorten_url(get_token_link(token_id, BOT_USERNAME))
             await safe_api_call(callback_query.edit_message_text(
-                text="You are not authorized",
+                text="To get this file, you'll need to unlock access first. Just tap the button below!",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("🔓 Unlock", url=short_link)]]
+                    [[InlineKeyboardButton("🔓 Unlock Now", url=short_link)]]
                 )
             ))
             return
 
         if bot.user_file_count.get(user_id, 0) >= bot.MAX_FILES_PER_SESSION:
-            await safe_api_call(callback_query.answer("Limit reached. Please take a break.", show_alert=True))
+            await safe_api_call(callback_query.answer(
+                "You've requested a lot of files! Please wait a moment before trying again. 😊",
+                show_alert=True
+            ))
             return
 
         file_doc = files_col.find_one({"channel_id": channel_id, "message_id": msg_id})
         if not file_doc:
-            await callback_query.answer("File not found.", show_alert=True)
+            await callback_query.answer("I couldn't find that file. It might have been removed.", show_alert=True)
             return
 
         file_name = file_doc.get("file_name", "Unknown File")
