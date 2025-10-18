@@ -124,14 +124,21 @@ async def safe_api_call(coro):
         logger.error(f"An error occurred during an API call: {e}")
         return None
 
-async def auto_delete_message(*messages):
-    await asyncio.sleep(AUTO_DELETE_SECONDS)
-    for message in messages:
-        if message:
-            try:
-                await safe_api_call(message.delete())
-            except Exception:
-                pass
+async def auto_delete_message(user_message, bot_message):
+    try:        
+        await asyncio.sleep(AUTO_DELETE_SECONDS)
+        await safe_api_call(user_message.delete())
+        await safe_api_call(bot_message.delete())
+    except Exception as e:
+        pass
+
+async def delete_after_delay(message, delay=AUTO_DELETE_SECONDS):
+    await asyncio.sleep(delay)
+    try:
+        await safe_api_call(message.delete())
+    except Exception as e:
+        logger.error(f"Failed to auto delete message: {e}")
+        
 
 # =========================
 # Queue System for File Processing
@@ -166,7 +173,7 @@ async def file_queue_worker(bot):
                 f"🎥 <b>File:</b> <code>{file_name}</code>\n\nYour links are ready!",
                 reply_markup=reply_markup
             )
-            bot.loop.create_task(auto_delete_message(user_message))
+            bot.loop.create_task(delete_after_delay(user_message))
         except Exception as e:
             logger.error(f"Error processing file: {e}")
             await reply_message.edit_text("❌ Failed to process your file. Please try again later.")
