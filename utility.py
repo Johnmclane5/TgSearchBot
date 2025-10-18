@@ -33,7 +33,7 @@ from mutagen import File as MutagenFile
 # =========================
 
 TOKEN_VALIDITY_SECONDS = 24 * 60 * 60  # 24 hours
-AUTO_DELETE_SECONDS = 3 * 60
+AUTO_DELETE_SECONDS = 2 * 60
 
 # Simple in-memory cache: {(q, channel_id): (timestamp, results)}
 search_api_cache = {}
