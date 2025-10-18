@@ -52,20 +52,16 @@ async def start_handler(client, message):
         if len(message.command) == 2 and message.command[1].startswith("token_"):
             if is_token_valid(message.command[1][6:], user_id):
                 authorize_user(user_id)
-                reply_msg = await safe_api_call(message.reply_text("✅ You are authorized now!"))
+                reply_msg = await safe_api_call(message.reply_text("Great! You're all set to get files. ✅"))
                 await safe_api_call(bot.send_message(LOG_CHANNEL_ID, f"✅ User <b>{user_link} | <code>{user_id}</code></b> authorized via @{BOT_USERNAME}"))
             else:
-                reply_msg = await safe_api_call(message.reply_text("❌ Invalid or expired token. Please get a new one."))
+                reply_msg = await safe_api_call(message.reply_text("Oh no! It looks like your access key is invalid or has expired. Please get a new one. 🔑"))
                 await safe_api_call(bot.send_message(LOG_CHANNEL_ID, f"❌ User <b>{user_link} | <code>{user_id}</code></b> used invalid or expired token."))
         else:
-            user_doc = users_col.find_one({"user_id": user_id})
-            joined_date = user_doc.get("joined", "Unknown")
-            joined_str = joined_date.strftime("%Y-%m-%d %H:%M") if isinstance(joined_date, datetime) else str(joined_date)
-
             welcome_text = (
-                f"Hey <b>{first_name}</b> 👋\n\n"
-                f"Type any keywords to 🔎\n\n"
-                f"👤 Joined: {joined_str}"
+                f"Hi <b>{first_name}</b>, welcome! 👋\n\n"
+                "I'm here to help you find what you're looking for. "
+                "Just send me a keyword, and I'll start searching for you! 🔎"
             )
             reply_msg = await safe_api_call(message.reply_text(
                 welcome_text,
@@ -111,17 +107,17 @@ async def instant_search_handler(client, message):
         if user_doc.get("blocked", True):
             return
 
-        reply = await message.reply_text(text="Please wait ...", quote=True, reply_to_message_id=message.id)
+        reply = await message.reply_text(text="Just a moment...", quote=True, reply_to_message_id=message.id)
         await asyncio.sleep(3)
 
         if BACKUP_CHANNEL and not await is_user_subscribed(client, user_id):
             await safe_api_call(reply.edit_text(
                 text=(
-                    "🚫 You must join our Updates Channel to use the bot.\n\n"
-                    "Click the button below to join and then try again."
+                    "To get started, please join our updates channel. "
+                    "It's the best way to stay in the loop! 😊"
                 ),
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("🔔 Join Bot Updates", url=f"https://t.me/{BACKUP_CHANNEL}")]]
+                    [[InlineKeyboardButton("🔔 Join Updates", url=f"https://t.me/{BACKUP_CHANNEL}")]]
                 )
             ))
             bot.loop.create_task(auto_delete_message(message, reply))
@@ -129,10 +125,10 @@ async def instant_search_handler(client, message):
 
         channels = list(allowed_channels_col.find({}, {"_id": 0, "channel_id": 1, "channel_name": 1}))
         if not channels:
-            await safe_api_call(reply.edit_text("No allowed channels available for search."))
+            await safe_api_call(reply.edit_text("I couldn't find any channels to search in. Please check back later!"))
             return
 
-        text = "<b>🛒 Choose a Category</b>"
+        text = "<b>Which category would you like to search in? 🛒</b>"
         buttons = []
         for c in channels:
             chan_id = c["channel_id"]
