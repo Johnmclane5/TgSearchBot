@@ -47,7 +47,6 @@ OWNER_ID = int(os.getenv('OWNER_ID'))
 BOT_USERNAME = os.getenv('BOT_USERNAME')
 UPDATE_CHANNEL_ID = int(os.getenv('UPDATE_CHANNEL_ID', 0))
 UPDATE_CHANNEL_ID2 = int(os.getenv('UPDATE_CHANNEL_ID2', 0))
-TMDB_CHANNEL_ID = os.getenv('TMDB_CHANNEL_ID', '').split(',')
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID'))
 BACKUP_CHANNEL = os.getenv('BACKUP_CHANNEL', '')
 
@@ -56,8 +55,6 @@ MY_DOMAIN = os.getenv('MY_DOMAIN')
 TOKEN_VALIDITY_SECONDS = 24 * 60 * 60  # 24 hours
 
 MONGO_URI = os.getenv("MONGO_URI")
-
-TMDB_API_KEY = os.getenv('TMDB_API_KEY')
 
 #SHORTERNER API
 URLSHORTX_API_TOKEN = os.getenv('URLSHORTX_API_TOKEN')

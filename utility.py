@@ -5,7 +5,6 @@ import asyncio
 import base64
 import uuid
 import time
-import PTN
 import os
 import logging
 from datetime import datetime, timezone, timedelta
@@ -17,11 +16,9 @@ from db import (
     users_col,
     tokens_col,
     auth_users_col,
-    files_col,
-    tmdb_col
+    files_col
 )
 from config import *
-from tmdb import get_movie_id, get_tv_id, get_info
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -40,107 +37,6 @@ search_api_cache = {}
 CACHE_TTL = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)
-
-def get_cache_key(q, channel_id):
-    return (q.strip().lower(), channel_id)
-
-# CACHE FOR SEARCH RESULTS
-search_cache = {}
-SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
-
-def make_search_cache_key(query, page, channel_id=None):
-    return (query.lower(), page, channel_id)
-
-def get_cached_search(query, page, channel_id=None):
-    key = make_search_cache_key(query, page, channel_id)
-    entry = search_cache.get(key)
-    if entry and (time.time() - entry['time'] < SEARCH_CACHE_TTL):
-        return entry['files'], entry['total_files']
-    if entry:
-        del search_cache[key]
-    return None, None
-
-def set_cached_search(query, page, channel_id, files, total_files):
-    key = make_search_cache_key(query, page, channel_id)
-    search_cache[key] = {
-        'files': files,
-        'total_files': total_files,
-        'time': time.time()
-    }
-
-def invalidate_search_cache():
-    search_cache.clear()
-    search_api_cache.clear()
-
-def build_search_pipeline(query, allowed_ids, skip, limit):
-    # Split the query string into words
-    terms = query.strip().lower().split()
-
-    # Create a separate `text` clause for each term
-    must_clauses = [
-        {
-            "text": {
-                "query": term,
-                "path": "file_name"
-            }
-        }
-        for term in terms
-    ]
-
-    # Build search stage with compound.must
-    search_stage = {
-        "$search": {
-            "index": "default",
-            "compound": {
-                "must": must_clauses
-            }
-        }
-    }
-
-    # Match allowed channel IDs
-    match_stage = {
-        "$match": {
-            "channel_id": {"$in": allowed_ids}
-        }
-    }
-
-    # Project only necessary fields and search score
-    project_stage = {
-        "$project": {
-            "_id": 0,
-            "file_name": 1,
-            "file_size": 1,
-            "file_format": 1,
-            "message_id": 1,
-            "channel_id": 1,
-            "score": {"$meta": "searchScore"}
-        }
-    }
-
-    # Sort results by score and then file name
-    sort_stage = {
-        "$sort": {
-            "file_name": 1,
-            "score": -1
-        }
-    }
-
-    # Facet: paginated results and total count
-    facet_stage = {
-        "$facet": {
-            "results": [
-                project_stage,
-                sort_stage,
-                {"$skip": skip},
-                {"$limit": limit}
-            ],
-            "totalCount": [
-                {"$count": "total"}
-            ]
-        }
-    }
-
-    return [search_stage, match_stage, facet_stage]
 
 # =========================
 # Channel & User Utilities
@@ -324,51 +220,6 @@ def upsert_file_info(file_info):
         upsert=True
     )
 
-def upsert_tmdb_info(tmdb_id, tmdb_type):
-    """
-    Insert or update TMDB info in tmdb_col.
-    Only stores tmdb_id and tmdb_type.
-    """
-    tmdb_col.update_one(
-        {"tmdb_id": tmdb_id, "tmdb_type": tmdb_type},
-        {"$setOnInsert": {"tmdb_id": tmdb_id, "tmdb_type": tmdb_type}},
-        upsert=True
-    )
-
-async def restore_tmdb_photos(bot, start_id=None):
-    """
-    Restore all TMDB poster photos from the database.
-    For each tmdb entry, fetch details and send the poster to UPDATE_CHANNEL_ID.
-    """
-    query = {}
-    if start_id:
-        query['_id'] = {'$gt': start_id}
-    cursor = tmdb_col.find(query).sort('_id', 1)
-    docs = list(cursor)
-    for doc in docs:
-        tmdb_id = doc.get("tmdb_id")
-        tmdb_type = doc.get("tmdb_type")
-        try:
-            results = await get_info(tmdb_type, tmdb_id)
-            poster_url = results.get('poster_url')
-            trailer = results.get('trailer_url')
-            info = results.get('message')
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🎥 Trailer", url=trailer)]]) if trailer else None
-            if poster_url:
-                await safe_api_call(
-                    bot.send_photo(
-                        UPDATE_CHANNEL_ID,
-                        photo=poster_url,
-                        caption=info,
-                        parse_mode=enums.ParseMode.HTML,
-                        reply_markup=keyboard
-                    )
-                )
-        except Exception as e:
-            logger.error(f"Error in restore_tmdb_photos for tmdb_id={tmdb_id}: {e}")
-            continue  # Continue to the next doc
-
 
 def extract_file_info(message, channel_id=None):
     """Extract file info from a Pyrogram message."""
@@ -458,23 +309,6 @@ async def auto_delete_message(user_message, bot_message):
         pass
 
 
-async def extract_tmdb_link(tmdb_url):
-    movie_pattern = r'themoviedb\.org\/movie\/(\d+)'
-    tv_pattern = r'themoviedb\.org\/tv\/(\d+)'
-    collection_pattern = r'themoviedb\.org\/collection\/(\d+)'
-    if re.search(movie_pattern, tmdb_url):
-        tmdb_type = 'movie'
-        tmdb_id = int(re.search(movie_pattern, tmdb_url).group(1))
-    elif re.search(tv_pattern, tmdb_url):
-        tmdb_type = 'tv'
-        tmdb_id = int(re.search(tv_pattern, tmdb_url).group(1)) 
-    elif re.search(collection_pattern, tmdb_url):
-        tmdb_type = 'collection'
-        tmdb_id = int(re.search(collection_pattern, tmdb_url).group(1)) 
-    else:
-        raise ValueError("Invalid TMDB link. Must be a movie, tv, or collection link.")
-    return tmdb_type, tmdb_id
-        
 # =========================
 # Queue System for File Processing
 # =========================
@@ -513,46 +347,6 @@ async def process_audio_file(bot, message):
         logger.error(f"Error processing audio file: {e}")
 
 
-async def process_tmdb_info(bot, file_info):
-    """Processes TMDB info for a file."""
-    try:
-        if str(file_info["channel_id"]) in TMDB_CHANNEL_ID:
-            title = remove_redandent(file_info["file_name"])
-            parsed_data = PTN.parse(title)
-            title = parsed_data.get("title", "").replace("_", " ").replace("-", " ").replace(":", " ")
-            title = ' '.join(title.split())
-            year = parsed_data.get("year")
-            season = parsed_data.get("season")
-            episode = parsed_data.get("episode")
-            if season or episode:
-                result = await get_tv_id(title, year)
-            else:
-                result = await get_movie_id(title, year)
-            tmdb_id, tmdb_type = result['id'], result['media_type']
-            exists = tmdb_col.find_one({"tmdb_id": tmdb_id, "tmdb_type": tmdb_type})
-            if not exists:
-                results = await get_info(tmdb_type, tmdb_id)
-                poster_url = results.get('poster_url')
-                trailer = results.get('trailer_url')
-                info = results.get('message')
-                keyboard = InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("🎥 Trailer", url=trailer)]]) if trailer else None
-
-                if poster_url:
-                    await safe_api_call(
-                        bot.send_photo(
-                            UPDATE_CHANNEL_ID,
-                            photo=poster_url,
-                            caption=info,
-                            parse_mode=enums.ParseMode.HTML,
-                            reply_markup=keyboard
-                        )
-                    )
-                    upsert_tmdb_info(tmdb_id, tmdb_type)
-    except Exception as e:
-        logger.info(f"TMDB Info not found for {file_info['file_name']}: {e}")
-
-
 async def file_queue_worker(bot):
     while True:
         item = await file_queue.get()
@@ -566,7 +360,6 @@ async def file_queue_worker(bot):
             if duplicate:
                 if message.audio:
                     await process_audio_file(bot, message)
-                await process_tmdb_info(bot, file_info)
 
         except Exception as e:
             logger.error(f"❌ Error saving file: {e}")
@@ -611,39 +404,6 @@ async def periodic_expiry_cleanup(interval_seconds=3600 * 4):
         delete_expired_tokens()
         await asyncio.sleep(interval_seconds)
 
-
-def remove_redandent(filename):
-    """
-    Remove common username patterns from a filename while preserving the content title.
-
-    Args:
-        filename (str): The input filename
-
-    Returns:
-        str: Filename with usernames removed
-    """
-    filename = filename.replace("\n", "\\n")
-
-    patterns = [
-        r"^@[\w\.-]+?(?=_)",
-        r"_@[A-Za-z]+_|@[A-Za-z]+_|[\[\]\s@]*@[^.\s\[\]]+[\]\[\s@]*",  
-        r"^[\w\.-]+?(?=_Uploads_)",  
-        r"^(?:by|from)[\s_-]+[\w\.-]+?(?=_)",  
-        r"^\[[\w\.-]+?\][\s_-]*",  
-        r"^\([\w\.-]+?\)[\s_-]*",  
-    ]
-
-    result = filename
-    for pattern in patterns:
-        match = re.search(pattern, result)
-        if match:
-            result = re.sub(pattern, " ", result)
-            break  
-
-    
-    result = re.sub(r"^[_\s-]+|[_\s-]+$", " ", result)
-
-    return result
 
 async def get_audio_thumbnail(audio_path, output_dir="downloads"):
     audio = MutagenFile(audio_path)

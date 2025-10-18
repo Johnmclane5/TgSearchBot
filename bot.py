@@ -4,8 +4,7 @@ import uvicorn
 import logging
 
 from app import bot
-from db import files_col
-from utility import file_queue_worker, periodic_expiry_cleanup
+from utility import periodic_expiry_cleanup
 from fast_api import api
 from config import LOG_CHANNEL_ID
 
@@ -13,13 +12,9 @@ async def main():
     """
     Starts the bot and FastAPI server.
     """
-    if "file_name_text" not in [idx["name"] for idx in files_col.list_indexes()]:
-        files_col.create_index([("file_name", "text")])
-
     await bot.start()
 
     bot.loop.create_task(start_fastapi())
-    bot.loop.create_task(file_queue_worker(bot))
     bot.loop.create_task(periodic_expiry_cleanup())
 
     try:
