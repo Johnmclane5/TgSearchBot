@@ -15,10 +15,11 @@ from utility import (
     build_search_pipeline,
     human_readable_size,
     is_user_authorized,
+    delete_after_delay,
     generate_token,
     shorten_url,
     get_token_link,
-    safe_api_call,
+    safe_api_call
 )
 from query_helper import get_query_by_id
 from app import bot
