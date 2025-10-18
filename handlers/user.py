@@ -98,6 +98,10 @@ async def instant_search_handler(client, message):
     reply = None
     user_id = message.from_user.id
     try:
+
+        if message.from_user and message.from_user.is_bot:
+            return
+    
         query = bot.sanitize_query(message.text)
         if not query:
             return

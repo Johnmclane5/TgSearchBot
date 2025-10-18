@@ -8,7 +8,7 @@ from pyrogram import filters, enums
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import MessageNotModified
 
-from config import LOG_CHANNEL_ID, BOT_USERNAME, MY_DOMAIN
+from config import LOG_CHANNEL_ID, BOT_USERNAME
 from db import files_col, allowed_channels_col, tokens_col
 from utility import (
     get_user_link,
