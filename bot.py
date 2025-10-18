@@ -7,6 +7,8 @@ from app import bot
 from utility import file_queue_worker, periodic_expiry_cleanup
 from fast_api import api
 from config import LOG_CHANNEL_ID
+import handlers.user
+import handlers.owner
 
 async def main():
     """
