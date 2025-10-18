@@ -74,7 +74,7 @@ async def start_handler(client, message):
 
     if reply_msg:
         # Only delete the user's /start command, not the bot's reply
-        bot.loop.create_task(auto_delete_message(message))
+        bot.loop.create_task(auto_delete_message(message, reply_msg))
 
 
 @bot.on_message(filters.private & (filters.document | filters.video | filters.audio))
