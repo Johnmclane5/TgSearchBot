@@ -250,23 +250,17 @@ def get_token_link(token_id, bot_username):
     return f"https://telegram.dog/{bot_username}?start=token_{token_id}"
 
 async def is_user_subscribed(client, user_id):
-    try:
         """Check if a user is subscribed to backup channel."""
         if not BACKUP_CHANNEL:
             return True  # No backup channel configured, consider all subscribed
         try:
             member = await client.get_chat_member(BACKUP_CHANNEL, user_id)
+            return not member.status == 'kicked'
         except UserNotParticipant:
-            pass
+            return False
         except Exception as e:
             logger.exception(e)
-        else:
-            if not member.status == 'kicked':
-                return True
-    except Exception as e:
-        logger.error(f"Error in is_user_subscribed: {e}")
-        
-    return False
+            return False
 # =========================
 # Link & URL Utilities
 # =========================
