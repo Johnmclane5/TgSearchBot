@@ -153,6 +153,7 @@ async def send_file_callback(client, callback_query: CallbackQuery):
             await safe_api_call(callback_query.answer(
                 "File will delete in few minutes forward it to you saved messages!", show_alert=True
             ))
+            bot.loop.create_task(delete_after_delay(client, copy_msg.chat.id, copy_msg.id))
         else:
             await safe_api_call(callback_query.answer(
                 "Failed to send file. Please try again later.", show_alert=True
