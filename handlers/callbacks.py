@@ -137,32 +137,17 @@ async def send_file_callback(client, callback_query: CallbackQuery):
 
         file_name = file_doc.get("file_name", "Unknown File")
 
-        download_url = f"{MY_DOMAIN}/download/{file_link}"
-        mx_player_url = f"{MY_DOMAIN}/play/mx/{file_link}"
-        mx_player_pro_url = f"{MY_DOMAIN}/play/mxpro/{file_link}"
-
-        buttons = [
-            [
-                InlineKeyboardButton("📥 DL", url=download_url),
-                InlineKeyboardButton("▶️ MX", url=mx_player_url),
-                InlineKeyboardButton("▶️ Pro", url=mx_player_pro_url)
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(buttons)
-
         copy_msg = await safe_api_call(client.copy_message(
             chat_id=user_id,
             from_chat_id=file_doc["channel_id"],
             message_id=file_doc["message_id"],
-            caption=f"🎥 <b>{file_name}</b>",
-            reply_markup=reply_markup,
-            protect_content=True
+            caption=f"🎥 <b>{file_name}</b>"
         ))
 
         if copy_msg:
             bot.user_file_count[user_id] = bot.user_file_count.get(user_id, 0) + 1
             await safe_api_call(callback_query.answer(
-                "File sent successfully!", show_alert=True
+                "File will delete in few minutes forward it to you saved messages!", show_alert=True
             ))
         else:
             await safe_api_call(callback_query.answer(
